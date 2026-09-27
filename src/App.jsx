@@ -47,9 +47,14 @@ export default function App() {
 
   async function handleNegotiationChoice(optionId) {
     if (!negotiation) return
-    // Re-create the same task with overload accepted or other options — simplified: accept & spread
-    await api.createTask({ text: document.querySelector('#task-input')?.value || negotiation.title, acceptOverload: true })
+    // The task (and its subtasks if auto-split) were already inserted in the DB; just schedule them.
+    const ids = negotiation.subtasks && negotiation.subtasks.length ? negotiation.subtasks : [negotiation.taskId]
+    // For 'spread'/'redistribute' we could pass different strategy flags; for now always schedule with overload accepted.
+    for (const id of ids) {
+      await api.acceptTask(id)
+    }
     setNegotiation(null)
+    // Refresh current page data by navigating home which will re-mount Dashboard.
     navigate('/')
   }
 

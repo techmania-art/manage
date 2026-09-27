@@ -13,6 +13,7 @@ export const api = {
   onboard: (text) => req('/onboard', { method: 'POST', body: { text } }),
   parseTask: (text) => req('/tasks/parse', { method: 'POST', body: { text } }),
   createTask: (data) => req('/tasks', { method: 'POST', body: data }),
+  acceptTask: (id, body = {}) => req(`/tasks/${id}/accept`, { method: 'POST', body }),
   tasks: (status = 'pending') => req('/tasks?status=' + status),
   complete: (id, actualMinutes) => req(`/tasks/${id}/complete`, { method: 'POST', body: { actualMinutes } }),
   skip: (id) => req(`/tasks/${id}/skip`, { method: 'POST' }),

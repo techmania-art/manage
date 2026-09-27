@@ -1,12 +1,15 @@
-import React, { useEffect, useState, useRef } from 'react'
+import React, { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { format, parseISO } from 'date-fns'
 import { api } from '../api.js'
 import TaskInput from '../components/TaskInput.jsx'
 import SessionItem from '../components/SessionItem.jsx'
 
 export default function Dashboard({ user, onCreateResult, onStartOnboarding }) {
+  const navigate = useNavigate()
   const [today, setToday] = useState(null)
   const [insights, setInsights] = useState([])
+  const [dismissedInsights, setDismissedInsights] = useState(new Set())
   const [consistency, setConsistency] = useState(null)
   const [opportunities, setOpportunities] = useState([])
   const [debt, setDebt] = useState([])
@@ -27,31 +30,48 @@ export default function Dashboard({ user, onCreateResult, onStartOnboarding }) {
   const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'
 
   async function applyOpportunity(opp) {
-    // Quick-accept: create tasks for the suggested items
     for (const s of opp.suggestions) {
-      await api.createTask({ title: s.title, estimatedMinutes: s.minutes, category: 'study' })
+      await api.createTask({ title: s.title, estimatedMinutes: s.minutes, category: 'study', acceptOverload: true })
     }
+    setOpportunities(os => os.filter(o => o.start !== opp.start))
     refresh()
+  }
+
+  function skipOpportunity(opp) {
+    setOpportunities(os => os.filter(o => o.start !== opp.start))
+  }
+
+  async function dismissInsight(idx) {
+    setDismissedInsights(s => new Set([...s, idx]))
   }
 
   async function handleSplit(tsk) {
     await api.split(tsk.id); refresh()
   }
 
+  async function handleSessionComplete(taskId) {
+    await api.complete(taskId)
+    await api.squadComplete()
+    refresh()
+  }
+
+  const visibleInsights = insights.filter((_, i) => !dismissedInsights.has(i))
+  const insight = visibleInsights[0]
+
   return (
     <div>
       <div className="greeting">{greeting}, {user.name} 👋</div>
       <h1>Here's your day</h1>
 
-      {insights.length > 0 && (
-        <div className={`insight-banner ${insights[0].type}`}>
-          <div className="insight-icon">{insights[0].type === 'warning' ? '⚠️' : insights[0].type === 'positive' ? '✨' : '💡'}</div>
+      {insight && (
+        <div className={`insight-banner ${insight.type}`}>
+          <div className="insight-icon">{insight.type === 'warning' ? '⚠️' : insight.type === 'positive' ? '✨' : '💡'}</div>
           <div className="insight-text">
             <strong>AI Insight</strong>
-            {insights[0].text}
+            {insight.text}
             <div className="insight-actions">
-              <button className="small" onClick={() => window.location.hash = '#/schedule'}>View schedule</button>
-              <button className="small ghost" onClick={refresh}>Dismiss</button>
+              <button className="small" onClick={() => navigate('/schedule')}>View schedule</button>
+              <button className="small ghost" onClick={() => dismissInsight(0)}>Dismiss</button>
             </div>
           </div>
         </div>
@@ -90,7 +110,7 @@ export default function Dashboard({ user, onCreateResult, onStartOnboarding }) {
           </div>
         )}
         {squad && (
-          <div className="card">
+          <div className="card" style={{cursor:'pointer'}} onClick={()=>navigate('/squad')}>
             <div className="card-header"><h3>{squad.name}</h3><span className="chip">#{squad.invite_code}</span></div>
             {squad.members.slice(0,3).map(m => (
               <div key={m.display_name} className="squad-member">
@@ -130,7 +150,7 @@ export default function Dashboard({ user, onCreateResult, onStartOnboarding }) {
           {opportunities.slice(0,2).map((opp, i) => (
             <div key={i} className="free-win">
               <div className="free-win-time">
-                {format(opp.start, 'h:mm a')} – {format(opp.end, 'h:mm a')} ({Math.round(opp.minutes/60*10)/10}h open)
+                {format(parseISO(opp.start), 'h:mm a')} – {format(parseISO(opp.end), 'h:mm a')} ({Math.round(opp.minutes/60*10)/10}h open)
               </div>
               <div className="free-win-title">I found {opp.suggestions.length} task{opp.suggestions.length>1?'s':''} that fit:</div>
               <div className="free-win-suggest">
@@ -138,7 +158,7 @@ export default function Dashboard({ user, onCreateResult, onStartOnboarding }) {
               </div>
               <div style={{marginTop:10, display:'flex', gap:8}}>
                 <button className="small" onClick={() => applyOpportunity(opp)}>Auto-fill this window</button>
-                <button className="small ghost">Skip</button>
+                <button className="small ghost" onClick={() => skipOpportunity(opp)}>Skip</button>
               </div>
             </div>
           ))}
@@ -150,8 +170,15 @@ export default function Dashboard({ user, onCreateResult, onStartOnboarding }) {
           <div className="card-header"><h3>Today's Schedule</h3><span className="chip">{nudge}</span></div>
           {today && today.sessions && today.sessions.length === 0 && <div style={{color:'var(--text-dim)',fontSize:14}}>Nothing scheduled yet. Add a task above!</div>}
           {today && today.sessions && today.sessions
-            .filter(s => s.end > new Date(Date.now() - 60*60*1000))
-            .map((s, i) => <SessionItem key={i} session={s} onComplete={refresh} />)}
+            .filter(s => parseISO(s.end) > new Date(Date.now() - 60*60*1000))
+            .map((s, i) => (
+              <div key={i} style={{position:'relative'}}>
+                <SessionItem session={s} onComplete={refresh} />
+                {s.taskId && !s.fixed && s.status !== 'completed' && (
+                  <button className="small" style={{position:'absolute', right:0, top:14}} onClick={() => handleSessionComplete(s.taskId)}>Done</button>
+                )}
+              </div>
+            ))}
         </div>
 
         <div className="card">
@@ -172,6 +199,11 @@ function UpcomingList({ onRefresh }) {
     await api.squadComplete()
     load(); onRefresh && onRefresh()
   }
+  async function skip(t) {
+    if (!confirm('Skip this task?')) return
+    await api.skip(t.id)
+    load(); onRefresh && onRefresh()
+  }
   return (
     <div>
       {tasks.length === 0 && <div style={{color:'var(--text-dim)',fontSize:14}}>No pending tasks. Nice work!</div>}
@@ -187,7 +219,10 @@ function UpcomingList({ onRefresh }) {
               {t.postponed_count > 0 && <> · ↻ {t.postponed_count}</>}
             </div>
           </div>
-          <button className="small ghost" onClick={()=>toggle(t)}>Done</button>
+          <div style={{display:'flex',gap:4}}>
+            <button className="small ghost" onClick={()=>skip(t)}>Skip</button>
+            <button className="small" onClick={()=>toggle(t)}>Done</button>
+          </div>
         </div>
       ))}
     </div>

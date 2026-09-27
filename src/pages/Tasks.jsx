@@ -11,8 +11,13 @@ export default function Tasks() {
   useEffect(() => { refresh() }, [filter])
 
   async function toggle(t) {
-    const actual = prompt('How many minutes did you actually spend? (leave blank to use estimate)', t.estimated_minutes || '')
-    await api.complete(t.id, actual ? parseInt(actual) : null)
+    const input = prompt('How many minutes did you actually spend? (Cancel = use estimate)', t.estimated_minutes || '')
+    if (input === null) {
+      await api.complete(t.id, null)
+    } else {
+      const n = parseInt(input)
+      await api.complete(t.id, isNaN(n) ? null : n)
+    }
     await api.squadComplete()
     refresh()
   }

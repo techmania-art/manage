@@ -86,7 +86,7 @@ r.post('/tasks', (req, res) => {
   const overflow = negotiateLoad(USER_ID, target)
 
   if (overflow.length && !body.acceptOverload) {
-    return res.json({ ok: 'negotiate', taskId, overflow, options: [
+    return res.json({ ok: 'negotiate', taskId, title, overflow, options: [
       { id: 'heavy', label: 'Keep days heavy', desc: 'Schedule as-is, accepting heavier days.' },
       { id: 'spread', label: 'Spread across more days', desc: 'Use extra buffer days to keep loads moderate.' },
       { id: 'start_today', label: 'Start today', desc: 'Begin now to avoid tomorrow\'s overload.' },
@@ -99,6 +99,19 @@ r.post('/tasks', (req, res) => {
   scheduleTasks(toSchedule, body.startFrom ? { startFrom: new Date(body.startFrom) } : {})
   updatePersonalModel(USER_ID)
   res.json({ ok: true, taskId, scheduled: toSchedule })
+})
+
+// Accept a pending negotiation (the task/subtasks are already created; just schedule them).
+r.post('/tasks/:id/accept', (req, res) => {
+  const id = parseInt(req.params.id)
+  const task = db.prepare('SELECT * FROM tasks WHERE id = ? AND user_id = ?').get(id, USER_ID)
+  if (!task) return res.status(404).json({ error: 'not found' })
+  // Gather subtasks if this is a parent split task
+  const subs = db.prepare('SELECT id FROM tasks WHERE parent_id = ? AND status IN (?, ?)').all(id, 'pending', 'ai_split')
+  const toSchedule = subs.length ? subs.map(s => s.id) : [id]
+  scheduleTasks(toSchedule, req.body.startFrom ? { startFrom: new Date(req.body.startFrom) } : {})
+  updatePersonalModel(USER_ID)
+  res.json({ ok: true, taskId: id, scheduled: toSchedule })
 })
 
 r.get('/tasks', (req, res) => {
@@ -120,17 +133,24 @@ r.post('/tasks/:id/complete', (req, res) => {
   const now = new Date().toISOString()
   const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id)
   if (!task) return res.status(404).json({ error: 'nope' })
+  // If there are uncompleted future sessions for this task, only mark past/upcoming-today sessions done, not the whole task.
+  const future = db.prepare(`SELECT COUNT(*) as c FROM schedule_sessions WHERE task_id=? AND is_completed=0 AND end_time > ?`).get(id, now).c
+  if (future > 0) {
+    // Mark all sessions that have ended as completed
+    db.prepare(`UPDATE schedule_sessions SET is_completed=1 WHERE task_id=? AND end_time <= ?`).run(id, now)
+    db.prepare(`UPDATE tasks SET status='in_progress' WHERE id=?`).run(id)
+    db.prepare(`INSERT INTO task_log (task_id, event, detail) VALUES (?, 'session_completed', 'Partial progress')`).run(id)
+    recordDailyMetrics(USER_ID, new Date())
+    return res.json({ ok: true, outcome: 'in_progress', remaining: future })
+  }
   const due = task.deadline || (task.due_date ? task.due_date + 'T23:00:00.000Z' : null)
   const outcome = due && parseISO(now) <= parseISO(due) ? 'on_time' : (due ? 'late' : 'on_time')
   db.prepare(`UPDATE tasks SET status='completed', completed_at=?, actual_minutes=?, outcome=? WHERE id=?`)
     .run(now, actual, outcome, id)
   db.prepare(`UPDATE schedule_sessions SET is_completed=1 WHERE task_id=?`).run(id)
   db.prepare(`INSERT INTO task_log (task_id, event, detail) VALUES (?, 'completed', ?)`).run(id, outcome)
-
-  // Update daily metrics for today
   recordDailyMetrics(USER_ID, new Date())
   updatePersonalModel(USER_ID)
-  recordDailyMetrics(USER_ID, new Date())
   res.json({ ok: true, outcome })
 })
 

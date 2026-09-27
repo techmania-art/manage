@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { format } from 'date-fns'
+import { format, parseISO } from 'date-fns'
 import { api } from '../api.js'
 import SessionItem from '../components/SessionItem.jsx'
 
@@ -25,6 +25,18 @@ export default function Schedule() {
 
   function toggleAccept(id) {
     setAccepted(s => ({ ...s, [id]: s[id] === false ? true : false }))
+  }
+
+  async function completeSession(taskId) {
+    await api.complete(taskId)
+    await api.squadComplete()
+    refresh()
+  }
+
+  async function skipSession(taskId) {
+    if (!confirm('Skip this task?')) return
+    await api.skip(taskId)
+    refresh()
   }
 
   if (!week) return <div style={{padding:40}}>Loading schedule…</div>
@@ -81,7 +93,17 @@ export default function Schedule() {
           <div className="load-bar-fill" style={{width: `${Math.min(100,today.loadPct)}%`, background: today.color==='red'?'var(--red)':today.color==='orange'?'var(--orange)':today.color==='yellow'?'var(--yellow)':'var(--green)'}}></div>
         </div>
         {today.sessions.length === 0 && <div style={{color:'var(--text-dim)'}}>Nothing scheduled.</div>}
-        {today.sessions.map((s,i) => <SessionItem key={i} session={s} />)}
+        {today.sessions.map((s,i) => (
+          <div key={i} style={{position:'relative'}}>
+            <SessionItem session={s} />
+            {s.taskId && !s.fixed && s.status !== 'completed' && parseISO(s.end) > new Date() && (
+              <div style={{position:'absolute', right:0, top:10, display:'flex', gap:6}}>
+                <button className="small ghost" onClick={()=>skipSession(s.taskId)}>Skip</button>
+                <button className="small" onClick={()=>completeSession(s.taskId)}>Done</button>
+              </div>
+            )}
+          </div>
+        ))}
       </div>
     </div>
   )

@@ -16,6 +16,15 @@ export default function Squad() {
     setNewGoal(''); refresh()
   }
   async function doneGoal(id) { await api.doneGoal(id); refresh() }
+  const [copied, setCopied] = useState(false)
+  async function copyInvite() {
+    try {
+      await navigator.clipboard.writeText(squad.invite_code)
+      setCopied(true); setTimeout(()=>setCopied(false), 1500)
+    } catch(e) {
+      alert(`Share this code with friends: ${squad.invite_code}`)
+    }
+  }
 
   if (!squad) return <div style={{padding:40}}>Loading squad…</div>
 
@@ -50,7 +59,9 @@ export default function Squad() {
               </div>
             </div>
           ))}
-          <button className="secondary" style={{width:'100%', marginTop:10}}>+ Invite friend</button>
+          <button className="secondary" style={{width:'100%', marginTop:10}} onClick={copyInvite}>
+            {copied ? '✓ Code copied!' : '+ Invite friend'}
+          </button>
         </div>
 
         <div className="card">
