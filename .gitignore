@@ -1,0 +1,9 @@
+node_modules/
+dist/
+server/lifepilot.db
+server/lifepilot.db-shm
+server/lifepilot.db-wal
+.env
+.env.local
+.DS_Store
+*.log
